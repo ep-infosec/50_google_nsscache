@@ -1,0 +1,136 @@
+#!/bin/bash
+
+set -x
+
+SLAPADD=/usr/sbin/slapadd
+SLAPD=/usr/sbin/slapd
+
+if [[ -z ${WORKDIR-} ]]; then
+    WORKDIR=$(mktemp -d -t nsscache.regtest.XXXXXX)
+    ARTIFACTS=${WORKDIR}
+fi
+
+slapd_apparmor_bkp="${WORKDIR}/slapd_profile.bkp"
+slapd_apparmor_override="/etc/apparmor.d/local/usr.sbin.slapd"
+slapd_apparmor="/etc/apparmor.d/usr.sbin.slapd"
+
+cleanup() {
+  if [[ -f "$slapd_apparmor_bkp" ]]; then
+    sudo mv "$slapd_apparmor_bkp" "$slapd_apparmor_override"
+    sudo apparmor_parser -r -T -W "$slapd_apparmor"
+  fi
+  if [[ -e "$WORKDIR/slapd.pid" ]]; then
+     kill -TERM $(cat $WORKDIR/slapd.pid)
+  fi
+  if [[ -z ${ADTTMP-}  ]]; then
+	rm -rf $WORKDIR
+  fi
+}
+
+trap cleanup 0 INT QUIT ABRT PIPE TERM
+
+TESTDIR=$(dirname -- "$0")
+
+apparmor_enabled() {
+  if [ -x /usr/sbin/aa-status ]; then
+    sudo /usr/sbin/aa-status --enabled && apparmor_enabled="0" || apparmor_enabled="1"
+  else
+    apparmor_enabled="1"
+  fi
+  return "$apparmor_enabled"
+}
+
+override_apparmor() {
+  # backup existing override
+  cp -af "$slapd_apparmor_override" "$slapd_apparmor_bkp"
+
+  # the test suite brings up a test slapd server running
+  # off /tmp/<tmpdir>.
+  echo "${WORKDIR}/ rw," | sudo tee "$slapd_apparmor_override"
+  echo "${WORKDIR}/** rwk," | sudo tee -a "$slapd_apparmor_override"
+  echo "${ARTIFACTS}/ rw," | sudo tee -a "$slapd_apparmor_override"
+  echo "${ARTIFACTS}/** rwk," | sudo tee -a "$slapd_apparmor_override"
+  sudo apparmor_parser -r -T -W "$slapd_apparmor"
+}
+
+setup_slapd() {
+    set -e
+    mkdir -p $WORKDIR/ldap
+    sed -e "s!@workdir@!$WORKDIR!" \
+	< ${TESTDIR}/slapd.conf.tmpl > $ARTIFACTS/slapd.conf
+    $SLAPADD -d -1 -f $ARTIFACTS/slapd.conf -b dc=example,dc=com -l ${TESTDIR}/default.ldif
+    $SLAPD -h ldapi://${WORKDIR//\//%2F}%2Fldapi -f $ARTIFACTS/slapd.conf &
+    slappid=$!
+    attempts=0
+    until ldapsearch -x -H ldapi://${WORKDIR//\//%2F}%2Fldapi -b "dc=example,dc=com" '(objectclass=*)'; do
+	attempts=$(($attempts + 1))
+	if [[ $attempts -gt 10 ]]; then
+	  echo "failed to connect to slapd in 60 attempts"
+	  exit 1
+        fi
+	sleep 0.1
+    done
+    set +e
+}
+
+run_nsscache() {
+    source=$1
+    cache=$2
+    config_orig="${TESTDIR}/slapd-nsscache.conf.tmpl"
+    config=$(mktemp -p ${ARTIFACTS} nsscache.${source}.conf.XXXXXX)
+    sed -e "s!@cache@!$cache!" \
+	-e "s!@source@!$source!" \
+	-e "s!@workdir@!$WORKDIR!" \
+	< $config_orig > $config
+    mkdir $WORKDIR/$cache
+    mkdir $WORKDIR/ldap-timestamps-$cache
+
+    nsscache status
+
+    nsscache -d -c "${config}" update --full
+    r=$?
+    if [[ $r -ne 0 ]]; then
+       echo FAILED: $r
+    fi
+    test_${cache}
+
+    nsscache -d -c "${config}" status
+}
+
+test_files() {
+	ls -alR $WORKDIR
+	set -e
+	grep jaq $WORKDIR/files/passwd.cache
+	grep jaq $WORKDIR/files/passwd.cache.ixname
+	grep 37 $WORKDIR/files/passwd.cache.ixuid
+	grep hax0rs $WORKDIR/files/group.cache
+	grep hax0rs $WORKDIR/files/group.cache.ixname
+	grep 31337 $WORKDIR/files/group.cache.ixgid
+	grep jaq $WORKDIR/files/shadow.cache
+	grep jaq $WORKDIR/files/shadow.cache.ixname
+	[[ $(stat -c%A $WORKDIR/files/shadow.cache) == "-rw-r-----" ]] || exit 1
+	[[ $(stat -c%A $WORKDIR/files/shadow.cache.ixname) == "-rw-r-----" ]] || exit 1
+}
+
+check () {
+    which nsscache
+    if [[ $? -ne 0 ]]; then
+        (
+            cd ${TESTDIR}/..
+            pip3 install --target="${WORKDIR}" .
+        )
+        export PATH=$PATH:${WORKDIR}/bin
+    fi
+    set -e
+    nsscache --version
+    set +e
+}
+
+check
+if apparmor_enabled; then
+  override_apparmor
+fi
+setup_slapd
+run_nsscache ldap files
+
+echo OK

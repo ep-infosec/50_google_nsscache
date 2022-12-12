@@ -1,0 +1,6 @@
+Tests: slapd-regtest
+Restrictions: allow-stderr
+Depends: @,
+	slapd,
+	ldap-utils,
+	db-util

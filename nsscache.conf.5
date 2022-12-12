@@ -1,0 +1,406 @@
+.TH NSSCACHE.CONF 5 2022-08-26 "nsscache 0.47" "File formats"
+.SH NAME
+nsscache.conf - NSS local cache synchroniser configuration file
+.SH SYNOPSIS
+.B /etc/nsscache.conf
+.SH DESCRIPTION
+.B nsscache
+synchronises a local NSS cache, and other databases, against a remote
+data source. This approach allows the administrator to separate the
+network from the NSS lookup codepath, improving speed and reliability
+of name services.
+
+The nsscache configuration file comprises of one DEFAULT section,
+followed by zero or more map-specific configuration sections.  The
+file format is similar to that of ".ini" files.
+
+The DEFAULT section must provide at least one
+\fBsource\fP
+keyword, specifying the data source to use, one
+\fBcache\fP
+keyword, specifying the means in which the cache data will be stored
+locally, one
+\fBmaps\fP
+keyword, specifying which NSS maps should be cached, and one
+\fBtimestamp_dir\fP
+keyword, specifying the location of the timestamps used for
+incremental updates.
+
+Additional global defaults, such as LDAP search parameters, or the
+filesystem location of the cache, may also be included in the DEFAULT
+section.
+
+Additional sections may be included that allow per-map overrides to
+configuration options.  For example, one might specify their global
+LDAP search base as
+\fBou=People\fP
+but want to override that for the
+\fIgroup\fP
+mapping as
+\fBou=Groups\fP
+
+Apart from the \fIsource\fP, \fIcache\fP, and \fImaps\fP configuration
+options, all options are prefixed by the name of the module that they
+configure.
+
+A complete list of configuration options follows.
+
+.SH DEFAULT-only OPTIONS
+
+.TP
+\fBsource\fP
+Specifies the source to use to retrieve NSS data from.
+
+Valid Options:
+.I ldap, s3, http
+
+.TP
+.B cache
+Specifies the cache method to use to store the data, which will be
+queried by the NSS itself.
+
+Valid options:
+.I files
+Store in a plain text file, similar in format to
+.I /etc/passwd.
+If the files-module option
+.I files_cache_filename_suffix
+is also set to
+.B cache
+then not only will the files be created with a \fB.cache\fP suffix, but also an index file will be written alongside, for use with the
+.I nss-cache
+NSS module.  (See https://github.com/google/libnss-cache.)
+
+.TP
+.B maps
+Specifies the names of the maps that will be queried and cached by
+.I nsscache
+
+Valid options:
+.I passwd
+.I group
+.I shadow
+.I netgroup
+.I automount
+.I sshkey
+
+.TP
+.B timestamp_dir
+Specifies the directory where update and modify timestamps are stored.
+
+.SH ldap SOURCE OPTIONS
+
+These options configure the behaviour of the
+.I ldap
+source.
+
+.TP
+.B ldap_ad
+Set to 1 if connecting to Active Directory. If enabled, default Active Directory
+attributes will be used for mapping. Leave disabled if connecting to
+.I openldap.
+
+.TP
+.B ldap_uri
+The LDAP URI to connect to.
+
+.TP
+.B ldap_base
+The base to perform LDAP searches under.
+
+.TP
+.B ldap_filter
+The search filter to use when querying.
+
+.TP
+.B ldap_scope
+The search scope to use.  Defaults to
+.I one
+
+Valid options:
+.I sub[tree]
+.I one[level]
+.I base
+
+.TP
+.B ldap_bind_dn
+The bind DN to use when connecting to LDAP.  Empty string is an
+anonymous bind.  Defaults to the empty string.
+
+.TP
+.B ldap_bind_password
+The bind password to use when connecting to LDAP.  Empty string is
+used for anonymous binds.  Defaults to the empty string.
+
+.TP
+.B ldap_timelimit
+Timelimit in seconds for search results to return.  \-1 means no limit.
+Defaults to \-1.
+
+.TP
+.B ldap_retry_max
+Number of retries on soft failures before giving up.  Defaults to 3.
+
+.TP
+.B ldap_retry_delay
+Delay in seconds between retries.  Defaults to 5.
+
+.TP
+.B ldap_tls_require_cert
+Sets expectations for SSL certificates, using TLS.  One
+of 'never', 'hard', 'demand', 'allow', or 'try' ('demand'
+is the default).  See \fBldap.conf\fP(5) for more information.
+
+.TP
+.B ldap_tls_cacertdir
+Directory for trusted CA certificates.  By default, the system's
+default CA certificate directory will be used.
+
+.TP
+.B ldap_tls_cacertfile
+Filename containing trusted CA certificates.
+
+.TP
+.B ldap_tls_certfile
+Filename of an optional LDAP client certificate. If specified,
+\fBldap_tls_keyfile\fP must also be specified.
+
+.TP
+.B ldap_tls_keyfile
+Filename of an optional LDAP client key.  Only plaintext (unencrypted) keys are
+currently supported.  If specified, \fBldap_tls_certfile\fP must also be
+specified.
+
+.TP
+.B ldap_tls_starttls
+Set to 1 to enable STARTTLS. Leave absent to disable.
+
+.TP
+.B ldap_uidattr
+The uid-like attribute in your directory. Defaults to uid.
+
+.TP
+.B ldap_use_rid
+If enabled (set to 1) the relative identifier (RID) wll be used for mapping.
+By default \fBuidNumber\fP and \fBgidNumber\fP will be mapped when connecting to OpenLDAP with a POSIX-like schema.
+When using Samba4 AD, these attributes won't exist.
+Leave disabled for default.
+It has no effect if the option \fBldap_ad\fP is enabled.
+
+.TP
+.B ldap_offset
+Default Offset option to map uidNumber and gidNumber to higher number.
+This can be useful to avoid conflict with already existing uidNumber and gidNumber.
+
+.TP
+.B ldap_uidregex
+A Python regex to extract uid components from the uid-like attribute.
+All matching groups are concatenated without spaces.
+For example:  '(.*)@example.com' would return a uid to the left of
+the @example.com domain.  Default is no regex.
+
+.TP
+.B ldap_groupregex
+A Python regex to extract group member components from the member or
+memberOf attributes.  All matching groups are concatenated without spaces.
+For example:  '(.*)@example.com' would return a member without the
+the @example.com domain.  Default is no regex.
+
+.TP
+.B ldap_nested_groups
+To enable expansion of nested groups, set this to 1. Note that this only
+applies during a full sync, and incremental synchronization should not be used
+if this is set.
+
+.TP
+.B ldap_override_shell
+If specified, set every user's login shell to the given one. May be
+useful on bastion hosts or to ensure uniformity. Enable for
+Active Directory since the attribute (loginShell) is not default.
+
+.TP
+.B ldap_home_dir
+Set a home directory for all users in passwd. If enabled (set to 1),
+all users will have their home directory in
+.I /home.
+
+.TP
+.B ldap_rfc2307bis
+Default uses rfc2307 schema. If rfc2307bis (groups stored as a list of DNs
+in 'member' attr), set this to 1.
+
+.TP
+.B ldap_debug
+Sets the debug level for the underlying C library.  Defaults to no logging.
+
+.SH s3 SOURCE OPTIONS
+
+These options configure the behaviour of the
+.I s3
+source.
+
+.TP
+.B s3_bucket
+AWS S3 bucket containing
+.I passwd, group, shadow
+objects.
+.B boto3
+python package should be installed to use this type of source.
+It is highly recommended to use s3 source only with AWS IAM role
+attached to the ec2 instance configured for read-only access to the bucket.
+So no extra configuration options like access_key and secret provided in config.
+Though they may be used via ~/.aws/config and ~/.aws/credentials because python
+boto3 library used in implementation is capable to read them by itself.
+
+.TP
+.B s3_passwd_object
+Object containing
+.B passwd
+array of records in json format. E.g.
+.I [{"Value": {"gid": 10000, "uid": 10000}, "Key": "user1"}].
+Valid attributes:
+.I "comment", "home", "shell", "passwd", "gid", "uid"
+
+.TP
+.B s3_group_object
+Object containing
+.B group
+array of records in json format. E.g.
+.I [{"Value": {"gid": 20000, "members": "user1\\nuser2\\nuser3"}, "Key": "group1"}].
+Valid attributes:
+.I "gid", "members"
+Members should be sequence of usernames split by \\n (see example above)
+
+.TP
+.B s3_shadow_object
+Object containing
+.B shadow
+array of records in json format. E.g.
+.I [{"Value": {"passwd": "*"}, "Key": "user1"}].
+Valid attributes:
+.I "passwd", "lstchg", "min", "max", "warn", "inact", "expire"
+
+.TP
+.B s3_sshkey_object
+Object containing
+.B sshkey
+array of records in json format. E.g.
+.I [{"Value": {"sshPublicKey": "ssh-rsa ..."}, "Key": "user1"}].
+Valid attributes:
+.I "sshPublicKey"
+
+.SH http SOURCE OPTIONS
+
+These options configure the behaviour of the
+.I http
+source.
+
+.TP
+.B http_passwd_url
+URL for an HTTP endpoint that returns a file containing
+.B passwd
+records in the standard format. E.g.
+.I root:*:0:0:System Administrator:/var/root:/bin/sh
+
+.TP
+.B http_group_url
+URL for an HTTP endpoint that returns a file containing
+.B group
+records in the standard format. E.g.
+.I users:x:100:memberships....
+
+.TP
+.B http_shadow_url
+URL for an HTTP endpoint that returns a file containing
+.B shadow
+records in the standard format. E.g.
+.I root:*:18866:0:99999:7:::
+
+.TP
+.B http_sshkey_url
+URL for an HTTP endpoint that returns a file containing
+.B sshkey
+records in the standard format. E.g.
+.I root:ssh-rsa ...
+
+.SH files CACHE OPTIONS
+These options configure the behaviour of the
+.I files
+cache.
+
+.TP
+.B files_dir
+Directory location to store the plain text files in.  Defaults to the
+current directory.
+
+.TP
+.B files_cache_filename_suffix
+A suffix appended to the cache filename to differentiate it from, say,
+system NSS databases.  Defaults to '.cache'.
+
+.TP
+.B files_local_automount_master
+A yes/no field only used for automount maps.  A 'yes' value will cause nsscache
+to update the auto.master file with the master map from the source.  A 'no'
+value will cause nsscache to leave auto.master alone, allowing the system to
+manage this file in other ways.  When set to 'no', nsscache will only update
+other automount maps defined both locally and in the source.  Defaults to 'yes'.
+
+.TP
+.B prefix
+A regular expression to capture a prefix, or mount point.
+
+.TP
+.B suffix
+A regular expression to modify the prefix.
+
+.SH EXAMPLE
+A typical example might look like this:
+
+  [DEFAULT]
+  source = ldap
+  cache = files
+  maps = passwd, group, shadow
+  ldap_uri = ldap://ldap.example.com
+  ldap_base = ou=People,dc=example,dc=com
+  ldap_filter = (objectclass=posixAccount)
+
+  files_dir = /etc
+  files_cache_filename_suffix = cache
+
+  [group]
+  ldap_base = ou=Group,dc=example,dc=com
+  ldap_filter = (objectclass=posixGroup)
+  ldap_nested_groups = 1
+
+  [shadow]
+  ldap_filter = (objectclass=posixAccount)
+
+And a complementary \fI\|/etc/nsswitch.conf\|\fP might look like this:
+
+  passwd: files cache
+  group: files cache
+  shadow: files cache
+
+.SH FILES
+.TP
+\fI\|/etc/nsscache.conf\|\fP
+The system-wide nsscache configuration file
+.SH "SEE ALSO"
+.TP
+\fInsscache\fP(1)
+.TP
+\fInsswitch.conf\fP(5)
+The system name service switch configuration file
+.TP
+\fIldap.conf\fP(5)
+Details on LDAP configuration options exposed by the LDAP client libraries.
+.SH AUTHOR
+Written by Jamie Wilkinson (jaq@google.com) and Vasilios Hoffman (vasilios@google.com).
+.TP
+The source code lives at https://github.com/google/nsscache
+.SH COPYRIGHT
+Copyright \(co 2007 Google, Inc.
+.br
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
